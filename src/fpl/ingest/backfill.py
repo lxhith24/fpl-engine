@@ -78,8 +78,13 @@ def backfill(con=None, *, through_event: int | None = None) -> int:
             df = fpl_api.fetch_event_live(ev, snapshot=False)
             if df.empty:
                 continue
-            # Only players who actually featured; a 0-minute row is not a match.
-            df = df[df["minutes"].fillna(0) > 0].copy()
+            # KEEP zero-minute rows. They are the negative class for the
+            # minutes model (Stage A): "was in the squad, did not play".
+            # Filtering them out leaves a classifier that has only ever seen
+            # players who featured, which cannot learn non-selection at all.
+            # Rows are still restricted to players whose team had a fixture,
+            # so a blank-gameweek player contributes nothing.
+            df = df.copy()
 
             meta = df["element"].map(
                 lambda e: lookup.get((ev, team_of.get(e, -1)), (None, None, None))

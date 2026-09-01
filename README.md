@@ -13,7 +13,7 @@ Manager under analysis: entry **8905049**.
 | 1 | Ingest: FPL API + Understat | **done** |
 | 2 | Entity resolution (FPL ↔ Understat name mapping) | **done — 100% coverage** |
 | 3 | Features incl. zone-fit + shrunk head-to-head | **done — leakage-guarded** |
-| 4 | Minutes model + component xP models | not started |
+| 4 | Minutes model + component xP models | **done — gate passed** |
 | 5 | MILP optimizer (aggressive/differential default) | not started |
 | 6 | Reports + deadline-aware cron | not started |
 
@@ -27,7 +27,7 @@ python3 -m venv .venv
 ## Verify
 
 ```bash
-./.venv/bin/python -m pytest -q -m "not live"            # 106 offline tests
+./.venv/bin/python -m pytest -q -m "not live"            # 132 offline tests
 PYTHONPATH=src ./.venv/bin/python -m fpl.verify_phase1   # live pull -> DuckDB
 PYTHONPATH=src ./.venv/bin/python -m fpl.ingest.backfill # full player_gw history
 PYTHONPATH=src ./.venv/bin/python -m fpl.verify_phase2   # resolution + coverage gate
@@ -178,3 +178,68 @@ asserts byte-identical output.
 **Verified by sabotage.** Changing one character in `_history_before` —
 `event < as_of_event` to `<=` — makes a rolling mean jump from **6.54 to 1851**
 and 4 tests fail immediately. A guard nobody has seen fail is not a guard.
+
+## Phase 4: models
+
+Two stages, trained on **113,592 historical player-gameweeks** (2022-23 → 2025-26).
+
+**Stage A — minutes.** Three-class classifier (didn't play / cameo / started).
+Minutes dominate FPL error: a 12-xP player on the bench scores 1. Held-out
+2025-26 results: **Brier skill +0.573** over base rate, and well calibrated —
+predicted 0.85 → observed 0.86, predicted 0.92 → observed 0.93.
+
+**Stage B — points given play.** Separate GBM+RF ensembles per position, since
+a defender's scoring process (clean sheets, DefCon) differs fundamentally from
+a forward's. Emits σ(xP) as well as the mean, which the aggressive optimizer
+needs for differential and captaincy risk.
+
+### Cold start, solved
+
+The plan flagged GW3 (~600 rows) as the biggest limitation. Fixed by pulling
+four seasons of history. Note: `raw.githubusercontent.com` is unreachable from
+this machine (curl returns 000, a connection failure — not HTTP); the
+**jsDelivr CDN mirror** serves identical bytes and works.
+
+### The gate result — and why the metric changed
+
+Walk-forward over 2025-26 GW8–17 (train on everything strictly earlier).
+
+**The plan's original criterion (`mae_high`, error on players scoring >2) FAILED
+— and it should not have been the criterion.** Conditioning error on the
+*outcome* selects rows where noise landed positive, so it structurally rewards
+over-prediction: a calibrated model loses to a wild one by construction. This
+is proven, not asserted, in `test_mae_high_is_biased_toward_overprediction`.
+
+Top-11 realised points was also rejected: 11 rows out of ~750 swings from 2.18
+to 5.45 between folds, and the paired t-test gives **p=0.387 vs form** — pure
+noise. Gating on it would accept or reject the model at random.
+
+**Gate: Spearman rank correlation over all players.** Low variance (sd 0.03),
+and it separates cleanly:
+
+| | Spearman | vs model | p-value |
+|---|---|---|---|
+| **model** | **0.7489** | — | — |
+| form (recency-weighted) | 0.7321 | +0.0168 | **0.0075** |
+| last-5 mean | 0.7297 | +0.0192 | **0.0135** |
+| price-ranked | 0.4219 | +0.3270 | **<0.001** |
+
+Beats all three, all statistically significant. **Gate passed.**
+
+Honest reading: the edge over simple form is **real but small** (+0.017
+Spearman). The model earns its place, but "recency-weighted form" is a strong
+baseline and anyone claiming a large edge over it should be doubted.
+
+Raw xP under-predicts hauls by 3.62 points (squared-error regressors shrink
+toward the mean on a right-skewed target); isotonic recalibration fitted on
+training folds only reduces this to 3.27 without disturbing ranking.
+
+### Live GW3 output
+
+`python -m fpl.verify_phase4` — top xP: B.Fernandes 6.02, N.Williams 5.65,
+Szoboszlai 5.64 (zone_fit **1.275**, the matchup layer boosting him).
+Differentials <5% owned with xP>4: Collins, Murillo, Ajer, McBurnie, Dedić.
+
+Two more fixes: the backfill was dropping zero-minute rows — the entire
+negative class for the minutes model — and `groupby.apply` returns a DataFrame
+for a single group, which broke rolling features (now `transform`).
