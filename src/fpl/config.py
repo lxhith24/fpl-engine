@@ -37,6 +37,9 @@ UNDERSTAT_PLAYERS_STATS = f"{UNDERSTAT_BASE}/main/getPlayersStats/"
 # Manager under analysis (see plan section 9.2).
 DEFAULT_ENTRY_ID = 8905049
 
+# Current season for Understat (their API uses numeric years, not "2026-27").
+CURRENT_SEASON = 2026
+
 # ---------------------------------------------------------------- politeness
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "

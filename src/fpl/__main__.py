@@ -19,7 +19,7 @@ from .ingest.fpl_api import (
     fetch_bootstrap,
     fetch_fixtures,
 )
-from .ingest.understat import fetch_league
+from .ingest.understat import fetch_league_data
 from .ingest.understat_shots import fetch_season_shots
 from .models.train import predict_gameweek
 from .optimize.squad import optimize_squad
@@ -44,8 +44,8 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     print(f"  {n} rows upserted")
 
     print("Refreshing Understat...", flush=True)
-    us = fetch_league("EPL", config.CURRENT_SEASON)
-    store.upsert(con, "understat_teams", us["teams"])
+    us = fetch_league_data("EPL", config.CURRENT_SEASON)
+    store.upsert(con, "understat_team_match", us["team_matches"])
     store.upsert(con, "understat_player_season", us["players"])
 
     print("Refreshing shot data...", flush=True)
