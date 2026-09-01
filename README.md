@@ -12,7 +12,7 @@ Manager under analysis: entry **8905049**.
 | 0 | Repo skeleton, venv, DuckDB store | **done** |
 | 1 | Ingest: FPL API + Understat | **done** |
 | 2 | Entity resolution (FPL ↔ Understat name mapping) | **done — 100% coverage** |
-| 3 | Features incl. zone-fit + shrunk head-to-head | not started |
+| 3 | Features incl. zone-fit + shrunk head-to-head | **done — leakage-guarded** |
 | 4 | Minutes model + component xP models | not started |
 | 5 | MILP optimizer (aggressive/differential default) | not started |
 | 6 | Reports + deadline-aware cron | not started |
@@ -27,8 +27,9 @@ python3 -m venv .venv
 ## Verify
 
 ```bash
-./.venv/bin/python -m pytest -q -m "not live"            # 51 offline tests
+./.venv/bin/python -m pytest -q -m "not live"            # 106 offline tests
 PYTHONPATH=src ./.venv/bin/python -m fpl.verify_phase1   # live pull -> DuckDB
+PYTHONPATH=src ./.venv/bin/python -m fpl.ingest.backfill # full player_gw history
 PYTHONPATH=src ./.venv/bin/python -m fpl.verify_phase2   # resolution + coverage gate
 ```
 
@@ -120,3 +121,60 @@ Current live result: **225/225 = 100%** coverage, all 364 Understat players
 mapped, 0 unmatched. The 6 sub-95 scores are Brazilian mononyms and
 transliteration variants (Alisson, Jair, Yarmoliuk/Yarmolyuk) — all manually
 audited and correct.
+
+## Phase 3: the matchup layer
+
+`build_features(as_of_event=N)` returns one row per (player, fixture) in GW N.
+Everything is point-in-time: only data available before GW N's deadline.
+
+### Zone fit — "this winger vs their weak flank" as a number
+
+Understat exposes shot coordinates via `getMatchData/{id}`, split by side — so
+a home shot IS an away-team concession. Two maps are built from the same rows:
+
+- **player attack map** — share of xG by zone (penalties excluded, or every
+  penalty taker looks identical)
+- **opponent concession map** — xG allowed per match by zone, shrunk toward the
+  league mean
+
+`zone_fit = Σ_z share[player,z] × weakness[opponent,z]`, clipped to [0.75, 1.35].
+
+**Bin tuning mattered.** The first cut (X=.70/.84, Y=.35/.65) put **80.7% of all
+xG in one zone**, making the dot product nearly constant. Retuned to
+X=[.78,.88], Y=[.40,.60] → ~62%. Verified against 548 non-penalty shots.
+
+**It discriminates.** Against Ipswich (weak wide: 1.19–1.32× league average in
+flank zones), flank shooters get **1.109** vs central shooters' **1.032**.
+Against Arsenal both get **0.944** — correctly flat for a uniformly solid
+defence.
+
+### Head-to-head is shrunk, and ablatable
+
+`shrunk_head_to_head()` with k=12: a 4-match record moves the estimate only 25%
+from baseline. With no history it returns the baseline exactly, so the feature
+is a no-op rather than noise. `enabled=False` neutralises it for the plan's
+ablation test.
+
+## Two more silent bugs found in Phase 3
+
+**3. `events.finished` lies.** At GW3 the API reported only GW1 finished, while
+GW2 had been played days earlier — `finished_provisional=True`, 90 minutes,
+scores recorded, but `finished=False` because bonus points weren't confirmed.
+Trusting the flag **halved the training set**. `played_events()` uses
+fixture-level evidence instead. (Caveat: bonus in a provisional GW can still
+shift a point or two, so the latest GW's labels are near-final, not final.)
+
+**4. `verify_phase1` only sampled 5 players.** It was a smoke test, so
+`player_gw` held 10 rows. Every rolling feature came back NaN. `ingest.backfill`
+now pulls all played gameweeks via `/event/{gw}/live/` — 622 rows, 364 players
+with history.
+
+## The leakage guard (Task 22)
+
+`tests/test_leakage.py` is the most important file here. It builds features
+twice from datasets identical up to GW N and absurd (9999) afterward, then
+asserts byte-identical output.
+
+**Verified by sabotage.** Changing one character in `_history_before` —
+`event < as_of_event` to `<=` — makes a rolling mean jump from **6.54 to 1851**
+and 4 tests fail immediately. A guard nobody has seen fail is not a guard.
