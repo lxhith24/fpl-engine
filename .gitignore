@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Data — regenerable from APIs; snapshots can grow large
+data/raw/
+data/interim/
+data/features/
+data/models/
+data/reports/
+*.duckdb
+*.duckdb.wal
