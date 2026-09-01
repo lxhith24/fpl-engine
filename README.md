@@ -27,7 +27,7 @@ python3 -m venv .venv
 ## Verify
 
 ```bash
-./.venv/bin/python -m pytest -q -m "not live"            # 171 offline tests
+./.venv/bin/python -m pytest -q -m "not live"            # 179 offline tests
 PYTHONPATH=src ./.venv/bin/python -m fpl.verify_phase1   # live pull -> DuckDB
 PYTHONPATH=src ./.venv/bin/python -m fpl.ingest.backfill # full player_gw history
 PYTHONPATH=src ./.venv/bin/python -m fpl.verify_phase2   # resolution + coverage gate
@@ -307,3 +307,32 @@ picked on **merit alone**. Formation moved 5-2-3 → 4-3-3 and XI xP rose
 
 13 transfers, −48 in hits. As predicted in the plan, this is a **Wildcard
 target, not a one-week move** — one transfer captures a small fraction of it.
+
+## Phase 6: reports + cron
+
+### Daily briefing
+
+`python -m fpl report` generates a markdown briefing:
+
+- Optimal XI with formation, captain/vice picks
+- Gap analysis vs your current squad
+- **Single best transfer** (not Wildcard rebuild)
+- Differentials (<5% owned, xP > 4)
+- Zone-fit matchup highlights
+
+### Cron job
+
+`fpl-daily-briefing` — runs 09:00 IST daily. Checks if GW deadline is within
+24h; if so, refreshes data and outputs the briefing. Otherwise silent.
+
+**Note:** requires `hermes gateway start` to fire. Currently scheduled, not
+active until the gateway runs.
+
+### CLI
+
+```bash
+python -m fpl refresh     # full data refresh
+python -m fpl predict     # generate predictions
+python -m fpl optimize    # run optimizer
+python -m fpl report      # full briefing
+```
