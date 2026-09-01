@@ -14,7 +14,7 @@ Manager under analysis: entry **8905049**.
 | 2 | Entity resolution (FPL ↔ Understat name mapping) | **done — 100% coverage** |
 | 3 | Features incl. zone-fit + shrunk head-to-head | **done — leakage-guarded** |
 | 4 | Minutes model + component xP models | **done — gate passed** |
-| 5 | MILP optimizer (aggressive/differential default) | not started |
+| 5 | MILP optimizer (aggressive/differential default) | **done** |
 | 6 | Reports + deadline-aware cron | not started |
 
 ## Setup
@@ -27,7 +27,7 @@ python3 -m venv .venv
 ## Verify
 
 ```bash
-./.venv/bin/python -m pytest -q -m "not live"            # 132 offline tests
+./.venv/bin/python -m pytest -q -m "not live"            # 171 offline tests
 PYTHONPATH=src ./.venv/bin/python -m fpl.verify_phase1   # live pull -> DuckDB
 PYTHONPATH=src ./.venv/bin/python -m fpl.ingest.backfill # full player_gw history
 PYTHONPATH=src ./.venv/bin/python -m fpl.verify_phase2   # resolution + coverage gate
@@ -243,3 +243,67 @@ Differentials <5% owned with xP>4: Collins, Murillo, Ajer, McBurnie, Dedić.
 Two more fixes: the backfill was dropping zero-minute rows — the entire
 negative class for the minutes model — and `groupby.apply` returns a DataFrame
 for a single group, which broke rolling features (now `transform`).
+
+## Phase 5: optimizer
+
+MILP via PuLP/CBC. Squad and starting XI are solved jointly, so the formation
+is chosen rather than assumed.
+
+Constraints: 15 players, £100.0m budget, 2/5/5/3 by position, max 3 per club,
+XI of 11 with ≥1 GKP / ≥3 DEF / ≥1 FWD. 12 fuzz seeds assert every solve is
+FPL-legal.
+
+### Aggressive is the default (your stated preference)
+
+`objective = xP + γ·σ − β·ownership`
+
+**Presets are expressed in units of spread, not raw coefficients.** The first
+version hard-coded γ=0.5, β=0.02 and all three risk modes returned nearly
+identical squads. Measured on live GW3 (219 players with xP>2):
+
+| quantity | spread | note |
+|---|---|---|
+| xP | 4.02 | |
+| σ | 0.66 | and corr(xP, σ) = **0.56** |
+| ownership | 70.0 | |
+
+γ=0.5 shifted scores by only 0.33 — under a tenth of the xP spread, so it
+never reordered anything. Presets now say "tilt by this fraction of the xP
+spread" and are rescaled per gameweek.
+
+Worth knowing: **σ correlates 0.56 with xP**, so variance-seeking partly just
+re-picks high-xP players. Ownership is the sharper differential lever, which is
+why aggressive leans on it harder.
+
+Live GW3 result — the modes now genuinely separate:
+
+| mode | XI xP | σ | mean own% |
+|---|---|---|---|
+| safe | 57.70 | 32.50 | 18.5 |
+| balanced | 57.89 | 32.66 | 18.2 |
+| **aggressive** | **57.06** | **33.19** | **15.0** |
+
+Aggressive gives up **0.83 xP** to cut ownership by 3.5 points. That is the
+trade being bought, stated explicitly rather than hidden.
+
+### The differential tax was being charged twice
+
+The XI choice originally used the same ownership-penalised score as squad
+selection. On live GW3 that benched **Szoboszlai (5.64 xP, 42% owned)** in
+favour of **Ajer (4.92 xP, 4.5% owned)** — giving away 0.73 xP for nothing,
+since benching a player you already own makes you no more differential.
+
+Fixed with two scores: ownership decides **who you own**; once owned, the XI is
+picked on **merit alone**. Formation moved 5-2-3 → 4-3-3 and XI xP rose
+57.12 → 57.84. Locked by `test_no_benched_outfielder_beats_a_worse_starter`.
+
+### Your squad vs the optimum
+
+| | XI xP |
+|---|---|
+| your best legal XI | 42.66 |
+| optimum | 57.06 |
+| **gap** | **+14.40** |
+
+13 transfers, −48 in hits. As predicted in the plan, this is a **Wildcard
+target, not a one-week move** — one transfer captures a small fraction of it.
