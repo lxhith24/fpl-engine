@@ -1,0 +1,13 @@
+# Manual FPL <-> Understat overrides.
+#
+# Format:  <understat_id>: <fpl_element_id>
+#
+# Only add an entry when the fuzzy matcher genuinely cannot resolve a player
+# (see `python -m fpl.verify_phase2` output for the current unmatched list).
+# Overrides take precedence over all fuzzy scoring and claim both sides of the
+# pair, so a wrong entry here silently corrupts two players, not one.
+#
+# Keep this file sorted by understat_id for reviewability.
+#
+# Example:
+#   1228: 426    # Bruno Fernandes (Understat 1228 -> FPL 426)

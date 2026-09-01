@@ -11,7 +11,7 @@ Manager under analysis: entry **8905049**.
 |---|---|---|
 | 0 | Repo skeleton, venv, DuckDB store | **done** |
 | 1 | Ingest: FPL API + Understat | **done** |
-| 2 | Entity resolution (FPL ↔ Understat name mapping) | not started |
+| 2 | Entity resolution (FPL ↔ Understat name mapping) | **done — 100% coverage** |
 | 3 | Features incl. zone-fit + shrunk head-to-head | not started |
 | 4 | Minutes model + component xP models | not started |
 | 5 | MILP optimizer (aggressive/differential default) | not started |
@@ -27,9 +27,14 @@ python3 -m venv .venv
 ## Verify
 
 ```bash
-./.venv/bin/python -m pytest -q -m "not live"   # 29 offline tests
+./.venv/bin/python -m pytest -q -m "not live"            # 51 offline tests
 PYTHONPATH=src ./.venv/bin/python -m fpl.verify_phase1   # live pull -> DuckDB
+PYTHONPATH=src ./.venv/bin/python -m fpl.verify_phase2   # resolution + coverage gate
 ```
+
+`verify_phase2` exits non-zero if resolution coverage drops below 98%, so it
+works as a CI gate. Verified in both directions: deliberately corrupting one
+team mapping drops coverage to 94.67% and the gate fails as intended.
 
 Offline tests run against saved payloads in `tests/fixtures/` — no network, so
 they stay green when sites change. `-m live` selects the two network-dependent
@@ -76,5 +81,42 @@ gameweek is reproducible and back-testable from source bytes.
 - Python 3.14.6 — all deps (pandas, duckdb, pulp, scikit-learn, xgboost, httpx,
   rapidfuzz, pyarrow) have working wheels; verified before pinning.
 - FPL element IDs and Understat player IDs are **different namespaces**. Phase 2
-  exists to map between them; do not assume they interchange.
+  maps between them (`player_map` table); do not assume they interchange.
 - FPL returns numeric stats as strings; parsers coerce and tests assert dtypes.
+
+## Entity resolution: two silent bugs worth knowing about
+
+Both were found against live data, produced **no error**, and simply dropped a
+player. Both are now locked down by regression tests.
+
+**1. `Ø` is not `O` + a diacritic.** It's a distinct letter, so Unicode NFD
+decomposition cannot strip it — `unicodedata.normalize("NFD", "Ødegaard")`
+returns `Ødegaard` unchanged. Martin Ødegaard therefore never matched Understat's
+"Martin Odegaard". `normalize()` now transliterates non-decomposable letters
+(ø, đ, ð, ł, ß, æ, œ, þ, ı, ŋ) *before* NFD folding.
+
+**2. `token_set_ratio` scores a strict subset as a perfect 100.** David *Raya
+Martín* generates the surname-fragment variant `"martin"`, which scored 100
+against "Martin Odegaard", won the greedy assignment, and stole Ødegaard's slot —
+so fixing bug 1 alone did not restore coverage. Scoring now uses
+`token_sort_ratio`/`WRatio`, and a bare single-token variant is only ever
+compared against the target's **surname**.
+
+Design choices that follow from this:
+
+- **Team is a hard constraint.** Candidates are only ever from the same club, so
+  a bad name match can't cross clubs. The 20-team map is hand-verified, not
+  fuzzy — 8 of 20 names differ (`Tottenham`→`Spurs`, `Nottingham Forest`→
+  `Nott'm Forest`, …).
+- **Greedy one-to-one assignment** within each club, highest score first. This is
+  what disambiguates genuine collisions like A.Murphy / J.Murphy at Newcastle.
+- **Understat's `position` field is ignored.** It's mostly `'S'` (substitute — a
+  role marker, not a position) and would inject noise rather than signal.
+- Coverage is measured over players with **≥90 minutes**; fringe players with no
+  appearances are legitimately absent from Understat and shouldn't count against
+  the gate.
+
+Current live result: **225/225 = 100%** coverage, all 364 Understat players
+mapped, 0 unmatched. The 6 sub-95 scores are Brazilian mononyms and
+transliteration variants (Alisson, Jair, Yarmoliuk/Yarmolyuk) — all manually
+audited and correct.

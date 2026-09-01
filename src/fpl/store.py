@@ -164,6 +164,17 @@ _DDL = [
         PRIMARY KEY (understat_id, season)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS player_map (
+        element      INTEGER NOT NULL,
+        understat_id VARCHAR NOT NULL,
+        score        DOUBLE,
+        method       VARCHAR,
+        season       INTEGER NOT NULL,
+        pulled_at    TIMESTAMP NOT NULL,
+        PRIMARY KEY (element, season)
+    )
+    """,
 ]
 
 
