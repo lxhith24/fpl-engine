@@ -13,3 +13,6 @@ data/models/
 data/reports/
 *.duckdb
 *.duckdb.wal
+
+# Secrets
+.env

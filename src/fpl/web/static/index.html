@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FPL Engine — dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>FPL Engine <span class="gw" id="gw">GW–</span></h1>
+    <span class="meta" id="meta"></span>
+    <span class="spacer"></span>
+    <button id="refresh">↻ Refresh</button>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <div class="layout">
+    <main id="main">
+      <div class="card"><span class="muted">Loading snapshot…</span></div>
+    </main>
+
+    <aside>
+      <div class="chat-head">
+        <span>Analyst</span>
+        <button id="chat-clear">clear</button>
+      </div>
+      <div class="chat-log" id="chat-log"></div>
+      <div class="suggests" id="suggests"></div>
+      <div class="chat-input">
+        <textarea id="chat-text" placeholder="Ask about this gameweek…" rows="1"></textarea>
+        <button id="chat-send">Send</button>
+      </div>
+    </aside>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

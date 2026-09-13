@@ -5,10 +5,12 @@ Usage:
     python -m fpl predict         # just predictions, no report
     python -m fpl optimize        # optimize from cached predictions
     python -m fpl refresh         # full data refresh + predictions
+    python -m fpl web             # local dashboard + chat panel
 """
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from . import config, store
@@ -113,6 +115,43 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_dotenv(path: str = ".env") -> None:
+    """Populate os.environ from a KEY=VALUE .env file; existing vars win."""
+    if not os.path.exists(path):
+        return
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key, value = key.strip(), value.strip().strip("'\"")
+            if key.startswith("export "):
+                key = key[len("export "):].strip()
+            os.environ.setdefault(key, value)
+
+
+def cmd_web(args: argparse.Namespace) -> int:
+    """Serve the local dashboard + chat panel."""
+    try:
+        import uvicorn
+    except ModuleNotFoundError:
+        print("Web UI needs extra deps. Install them with:\n"
+              "  ./.venv/bin/pip install -e '.[web]'")
+        return 1
+
+    _load_dotenv()
+    from .web.app import app
+
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+        print("Note: ANTHROPIC_API_KEY is not set — the dashboard works, but the "
+              "chat panel will be disabled until you set it.", flush=True)
+
+    print(f"Dashboard: http://{args.host}:{args.port}", flush=True)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="fpl", description="FPL Optimal XI Engine")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -127,6 +166,10 @@ def main() -> int:
     p_rep.add_argument("--entry", type=int, default=config.DEFAULT_ENTRY_ID)
     p_rep.add_argument("--print", action="store_true", help="Print report to stdout")
 
+    p_web = sub.add_parser("web", help="Serve the local dashboard + chat panel")
+    p_web.add_argument("--host", default="127.0.0.1")
+    p_web.add_argument("--port", type=int, default=8100)
+
     args = parser.parse_args()
 
     handlers = {
@@ -134,6 +177,7 @@ def main() -> int:
         "predict": cmd_predict,
         "optimize": cmd_optimize,
         "report": cmd_report,
+        "web": cmd_web,
     }
     return handlers[args.command](args)
 

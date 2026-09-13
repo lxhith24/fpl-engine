@@ -15,13 +15,15 @@ Manager under analysis: entry **8905049**.
 | 3 | Features incl. zone-fit + shrunk head-to-head | **done — leakage-guarded** |
 | 4 | Minutes model + component xP models | **done — gate passed** |
 | 5 | MILP optimizer (aggressive/differential default) | **done** |
-| 6 | Reports + deadline-aware cron | not started |
+| 6 | Reports + deadline-aware cron | **done** |
+| 7 | Local dashboard + Claude chat panel | **done** |
 
 ## Setup
 
 ```bash
 python3 -m venv .venv
 ./.venv/bin/pip install -e '.[dev]'
+./.venv/bin/pip install -e '.[web]'   # optional: dashboard + chat panel
 ```
 
 ## Verify
@@ -71,6 +73,10 @@ src/fpl/
     http.py        retry + per-host throttle + disk cache
     fpl_api.py     bootstrap/fixtures/element-summary/event-live, DGW-BGW detection
     understat.py   AJAX league + player stats
+  web/
+    snapshot.py    assemble the current-GW picture (dashboard + chat share it)
+    chat.py        read-only Claude analyst grounded in one snapshot
+    app.py         FastAPI: /api/snapshot, /api/chat (SSE), static dashboard
   verify_phase1.py end-to-end live check
 ```
 
@@ -335,4 +341,29 @@ python -m fpl refresh     # full data refresh
 python -m fpl predict     # generate predictions
 python -m fpl optimize    # run optimizer
 python -m fpl report      # full briefing
+python -m fpl web         # local dashboard + chat panel
 ```
+
+## Phase 7: dashboard + chat panel
+
+`python -m fpl web` serves a localhost dashboard (default
+<http://127.0.0.1:8100>, override with `--port`) over the current gameweek: the optimal XI, your squad
+and its gap, the best single transfer, differentials, zone-fit boosts, and a
+sortable/filterable predictions explorer.
+
+The right-hand **chat panel** is a read-only Claude analyst (`claude-sonnet-5`).
+Its entire context is a text digest of the same snapshot the dashboard renders —
+it explains the numbers, it cannot run the pipeline or change anything.
+
+```bash
+./.venv/bin/pip install -e '.[web]'    # fastapi, uvicorn, anthropic
+export ANTHROPIC_API_KEY=sk-ant-...     # chat panel is disabled without this
+PYTHONPATH=src ./.venv/bin/python -m fpl web
+```
+
+The dashboard reads only cached artifacts — run `python -m fpl predict` first so
+`data/reports/gw<N>_predictions.csv` exists. Snapshots are cached 60s; hit
+**↻ Refresh** (or `GET /api/snapshot?refresh=1`) to rebuild. `?entry=<id>` in the
+URL points it at a different manager.
+
+Endpoints: `GET /api/snapshot`, `POST /api/chat` (SSE stream), `GET /api/health`.
